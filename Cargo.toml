@@ -1,0 +1,12 @@
+[package]
+name = "freertos"
+version = "0.1.2"
+authors = ["Tobias Kaupat <tk@lobaro.de>", "Dominik Gschwind <dominik.gschwind99@gmail.com>"]
+edition = "2018"
+description = """
+FreeRTOS rust wrapper.
+"""
+keywords = ["FreeRTOS", "embedded", "library"]
+license = "MIT or APACHE-2.0"
+readme = "README.md"
+repository = "https://github.com/N3xed/freertos-rust"
