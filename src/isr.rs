@@ -1,12 +1,12 @@
 use crate::base::*;
-use crate::shim::*;
+use crate::glue;
 
 /// Keep track of whether we need to yield the execution to a different
 /// task at the end of the interrupt.
 ///
 /// Should be dropped as the last thing inside a interrupt.
 pub struct InterruptContext {
-    x_higher_priority_task_woken: FreeRtosBaseType,
+    x_higher_priority_task_woken: BaseType,
 }
 
 impl InterruptContext {
@@ -17,7 +17,7 @@ impl InterruptContext {
         }
     }
 
-    pub unsafe fn get_task_field_mut(&self) -> FreeRtosBaseTypeMutPtr {
+    pub unsafe fn get_task_field_mut(&self) -> *mut BaseType {
         self.x_higher_priority_task_woken as *mut _
     }
 }
@@ -26,7 +26,7 @@ impl Drop for InterruptContext {
     fn drop(&mut self) {
         if self.x_higher_priority_task_woken == 1 {
             unsafe {
-                freertos_rs_isr_yield();
+                glue::isr_yield();
             }
         }
     }

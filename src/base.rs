@@ -13,54 +13,27 @@ pub enum FreeRtosError {
     ProcessorHasShutDown,
 }
 
-unsafe impl Send for CVoid {}
+use core::ptr;
 
-#[repr(u32)]
-pub enum CVoid {
-    _Variant1,
-    _Variant2,
-}
+pub use chlorine::{c_char, c_void};
 
-pub type FreeRtosVoidPtr = *const CVoid;
-pub type FreeRtosMutVoidPtr = *mut CVoid;
-pub type FreeRtosCharPtr = *const u8;
-pub type FreeRtosChar = u8;
+pub use sys::BaseType_t as BaseType;
+pub use sys::StackType_t as StackType;
+pub use sys::TickType_t as TickType;
+pub use sys::UBaseType_t as UBaseType;
 
-pub type FreeRtosBaseType = i32;
-pub type FreeRtosUBaseType = u32;
-pub type FreeRtosTickType = u32;
-pub type FreeRtosBaseTypeMutPtr = *mut FreeRtosBaseType;
+pub type TaskHandle = *mut c_void;
+pub type MaybeTaskHandle = Option<ptr::NonNull<c_void>>;
+pub type QueueHandle = *mut c_void;
+pub type MaybeQueueHandle = Option<ptr::NonNull<c_void>>;
+pub type TimerHandle = *mut c_void;
+pub type MaybeTimerHandle = Option<ptr::NonNull<c_void>>;
 
-pub type FreeRtosTaskHandle = *const CVoid;
-pub type FreeRtosMutTaskHandle = *mut CVoid;
-pub type FreeRtosQueueHandle = *const CVoid;
-pub type FreeRtosSemaphoreHandle = *const CVoid;
-pub type FreeRtosTaskFunction = *const CVoid;
-pub type FreeRtosTimerHandle = *const CVoid;
-pub type FreeRtosTimerCallback = *const CVoid;
-#[allow(dead_code)]
-pub type FreeRtosStackType = *const CVoid;
-
-pub type FreeRtosUnsignedLong = u32;
-pub type FreeRtosUnsignedShort = u16;
-
-#[derive(Copy, Clone, Debug)]
-#[repr(C)]
-pub struct FreeRtosTaskStatusFfi {
-    pub handle: FreeRtosTaskHandle,
-    pub task_name: FreeRtosCharPtr,
-    pub task_number: FreeRtosUBaseType,
-    pub task_state: FreeRtosTaskState,
-    pub current_priority: FreeRtosUBaseType,
-    pub base_priority: FreeRtosUBaseType,
-    pub run_time_counter: FreeRtosUnsignedLong,
-    pub stack_base: FreeRtosCharPtr,
-    pub stack_high_water_mark: FreeRtosUnsignedShort,
-}
+pub use sys::TaskStatus_t as TaskStatusFfi;
 
 #[derive(Copy, Clone, Debug)]
 #[repr(u8)]
-pub enum FreeRtosTaskState {
+pub enum TaskState {
     /// A task is querying the state of itself, so must be running.
     Running = 0,
     /// The task being queried is in a read or pending ready list.

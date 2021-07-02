@@ -1,23 +1,23 @@
 use crate::base::*;
-use crate::shim::*;
+use crate::glue;
 use core::alloc::{GlobalAlloc, Layout};
 
-/**
-Use with:
-
-    #[global_allocator]
-    static GLOBAL: FreeRtosAllocator = FreeRtosAllocator;
-*/
-
+/// A global allocator that uses FreeRTOS's memory management
+///
+/// Use with:
+/// ```ignore
+/// #[global_allocator]
+/// static GLOBAL: FreeRtosAllocator = FreeRtosAllocator;
+/// ```
 pub struct FreeRtosAllocator;
 
 unsafe impl GlobalAlloc for FreeRtosAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let res = freertos_rs_pvPortMalloc(layout.size() as u32);
+        let res = glue::port_malloc(layout.size() as usize);
         return res as *mut u8;
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        freertos_rs_vPortFree(ptr as FreeRtosVoidPtr)
+        glue::port_free(ptr as *mut c_void)
     }
 }

@@ -1,6 +1,6 @@
 use crate::base::*;
 use crate::mutex::*;
-use crate::prelude::v1::*;
+use crate::prelude::*;
 use crate::queue::*;
 use crate::task::*;
 use crate::units::*;
@@ -30,14 +30,14 @@ impl ComputeTaskBuilder for TaskBuilder {
             let task_status = status.clone();
             let task = self.start(move |_this_task| {
                 {
-                    let mut lock = task_result.lock(Duration::infinite()).unwrap();
+                    let mut lock = task_result.lock(Ticks::infinite()).unwrap();
                     let r = func();
                     *lock = Some(r);
                 }
                 // release our reference to the mutex, so it can be deconstructed
                 drop(task_result);
                 task_status
-                    .send(ComputeTaskStatus::Finished, Duration::infinite())
+                    .send(ComputeTaskStatus::Finished, Ticks::infinite())
                     .unwrap();
             })?;
 
@@ -109,7 +109,7 @@ impl<R: Debug> ComputeTask<R> {
     }
 
     /// Wait until the task computes its result. Otherwise, returns a timeout.
-    pub fn wait_for_result<D: DurationTicks>(&mut self, max_wait: D) -> Result<(), FreeRtosError> {
+    pub fn wait_for_result(&mut self, max_wait: impl Into<Ticks>) -> Result<(), FreeRtosError> {
         if self.finished == true {
             Ok(())
         } else {
@@ -124,7 +124,7 @@ impl<R: Debug> ComputeTask<R> {
     }
 
     /// Consume the task and unwrap the computed return value.
-    pub fn into_result<D: DurationTicks>(mut self, max_wait: D) -> Result<R, FreeRtosError> {
+    pub fn into_result(mut self, max_wait: impl Into<Ticks>) -> Result<R, FreeRtosError> {
         self.wait_for_result(max_wait)?;
 
         if self.finished != true {

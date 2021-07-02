@@ -1,62 +1,66 @@
 use crate::base::*;
-use crate::prelude::v1::*;
-use crate::shim::*;
+use crate::glue;
 use crate::units::*;
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::mem;
+use core::ops::{Deref, DerefMut};
+use core::ptr;
 
-pub type Mutex<T> = MutexImpl<T, MutexNormal>;
-pub type RecursiveMutex<T> = MutexImpl<T, MutexRecursive>;
+pub type Mutex<T> = BasicMutex<T, Normal>;
+pub type RecursiveMutex<T> = BasicMutex<T, Recursive>;
 
-unsafe impl<T: Sync + Send, M> Send for MutexImpl<T, M> {}
+unsafe impl<T: Sync + Send, M> Send for BasicMutex<T, M> {}
 
-unsafe impl<T: Sync + Send, M> Sync for MutexImpl<T, M> {}
+unsafe impl<T: Sync + Send, M> Sync for BasicMutex<T, M> {}
 
 /// Mutual exclusion access to a contained value. Can be recursive -
 /// the current owner of a lock can re-lock it.
-pub struct MutexImpl<T: ?Sized, M> {
+pub struct BasicMutex<T: ?Sized, M> {
     mutex: M,
     data: UnsafeCell<T>,
 }
 
-impl<T: ?Sized, M> fmt::Debug for MutexImpl<T, M>
+impl<T: ?Sized, M> fmt::Debug for BasicMutex<T, M>
 where
-    M: MutexInnerImpl + fmt::Debug,
+    M: Lockable + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Mutex address: {:?}", self.mutex)
     }
 }
 
-impl<T> MutexImpl<T, MutexNormal> {
+impl<T> BasicMutex<T, Normal> {
     /// Create a new mutex with the given inner value
     pub fn new(t: T) -> Result<Self, FreeRtosError> {
-        Ok(MutexImpl {
-            mutex: MutexNormal::create()?,
+        Ok(BasicMutex {
+            mutex: Normal::create()?,
             data: UnsafeCell::new(t),
         })
     }
 }
 
-impl<T> MutexImpl<T, MutexRecursive> {
+impl<T> BasicMutex<T, Recursive> {
     /// Create a new recursive mutex with the given inner value
     pub fn new(t: T) -> Result<Self, FreeRtosError> {
-        Ok(MutexImpl {
-            mutex: MutexRecursive::create()?,
+        Ok(BasicMutex {
+            mutex: Recursive::create()?,
             data: UnsafeCell::new(t),
         })
     }
 }
 
-impl<T, M> MutexImpl<T, M>
+impl<T, M> BasicMutex<T, M>
 where
-    M: MutexInnerImpl,
+    M: Lockable,
 {
     /// Try to obtain a lock and mutable access to our inner value
-    pub fn lock<D: DurationTicks>(&self, max_wait: D) -> Result<MutexGuard<T, M>, FreeRtosError> {
+    pub fn lock(&self, max_wait: impl Into<Ticks>) -> Result<MutexGuard<T, M>, FreeRtosError> {
         self.mutex.take(max_wait)?;
 
         Ok(MutexGuard {
-            __mutex: &self.mutex,
-            __data: &self.data,
+            mutex: &self.mutex,
+            data: &self.data,
         })
     }
 
@@ -84,125 +88,119 @@ where
 /// Holds the mutex until we are dropped
 pub struct MutexGuard<'a, T: ?Sized + 'a, M: 'a>
 where
-    M: MutexInnerImpl,
+    M: Lockable,
 {
-    __mutex: &'a M,
-    __data: &'a UnsafeCell<T>,
+    mutex: &'a M,
+    data: &'a UnsafeCell<T>,
 }
 
 impl<'mutex, T: ?Sized, M> Deref for MutexGuard<'mutex, T, M>
 where
-    M: MutexInnerImpl,
+    M: Lockable,
 {
     type Target = T;
 
     fn deref<'a>(&'a self) -> &'a T {
-        unsafe { &*self.__data.get() }
+        unsafe { &*self.data.get() }
     }
 }
 
 impl<'mutex, T: ?Sized, M> DerefMut for MutexGuard<'mutex, T, M>
 where
-    M: MutexInnerImpl,
+    M: Lockable,
 {
     fn deref_mut<'a>(&'a mut self) -> &'a mut T {
-        unsafe { &mut *self.__data.get() }
+        unsafe { &mut *self.data.get() }
     }
 }
 
 impl<'a, T: ?Sized, M> Drop for MutexGuard<'a, T, M>
 where
-    M: MutexInnerImpl,
+    M: Lockable,
 {
     fn drop(&mut self) {
-        self.__mutex.give();
+        self.mutex.give();
     }
 }
 
-pub trait MutexInnerImpl
+pub trait Lockable
 where
     Self: Sized,
 {
     fn create() -> Result<Self, FreeRtosError>;
-    fn take<D: DurationTicks>(&self, max_wait: D) -> Result<(), FreeRtosError>;
+    fn take(&self, max_wait: impl Into<Ticks>) -> Result<(), FreeRtosError>;
     fn give(&self);
 }
 
-pub struct MutexNormal(FreeRtosSemaphoreHandle);
+pub struct Normal(QueueHandle);
 
-impl MutexInnerImpl for MutexNormal {
+impl Lockable for Normal {
     fn create() -> Result<Self, FreeRtosError> {
-        let m = unsafe { freertos_rs_create_mutex() };
-        if m == 0 as *const _ {
-            return Err(FreeRtosError::OutOfMemory);
+        match unsafe { glue::create_mutex() } {
+            Some(h) => Ok(Normal(h.as_ptr())),
+            None => Err(FreeRtosError::OutOfMemory),
         }
-        Ok(MutexNormal(m))
     }
 
-    fn take<D: DurationTicks>(&self, max_wait: D) -> Result<(), FreeRtosError> {
-        let res = unsafe { freertos_rs_take_mutex(self.0, max_wait.to_ticks()) };
-
-        if res != 0 {
-            return Err(FreeRtosError::MutexTimeout);
+    fn take(&self, max_wait: impl Into<Ticks>) -> Result<(), FreeRtosError> {
+        if unsafe { glue::take_mutex(self.0, max_wait.into().ticks) } {
+            Ok(())
+        } else {
+            Err(FreeRtosError::MutexTimeout)
         }
-
-        Ok(())
     }
 
     fn give(&self) {
         unsafe {
-            freertos_rs_give_mutex(self.0);
+            glue::give_mutex(self.0);
         }
     }
 }
 
-impl Drop for MutexNormal {
+impl Drop for Normal {
     fn drop(&mut self) {
-        unsafe { freertos_rs_delete_semaphore(self.0) }
+        unsafe { glue::delete_semaphore(self.0) }
     }
 }
 
-impl fmt::Debug for MutexNormal {
+impl fmt::Debug for Normal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self.0)
     }
 }
 
-pub struct MutexRecursive(FreeRtosSemaphoreHandle);
+pub struct Recursive(QueueHandle);
 
-impl MutexInnerImpl for MutexRecursive {
+impl Lockable for Recursive {
     fn create() -> Result<Self, FreeRtosError> {
-        let m = unsafe { freertos_rs_create_recursive_mutex() };
-        if m == 0 as *const _ {
-            return Err(FreeRtosError::OutOfMemory);
+        match unsafe { glue::create_recursive_mutex() } {
+            Some(m) => Ok(Recursive(m.as_ptr())),
+            None => Err(FreeRtosError::OutOfMemory),
         }
-        Ok(MutexRecursive(m))
     }
 
-    fn take<D: DurationTicks>(&self, max_wait: D) -> Result<(), FreeRtosError> {
-        let res = unsafe { freertos_rs_take_recursive_mutex(self.0, max_wait.to_ticks()) };
-
-        if res != 0 {
-            return Err(FreeRtosError::MutexTimeout);
+    fn take(&self, max_wait: impl Into<Ticks>) -> Result<(), FreeRtosError> {
+        if unsafe { glue::take_recursive_mutex(self.0, max_wait.into().ticks) } {
+            Ok(())
+        } else {
+            Err(FreeRtosError::MutexTimeout)
         }
-
-        Ok(())
     }
 
     fn give(&self) {
         unsafe {
-            freertos_rs_give_recursive_mutex(self.0);
+            glue::give_mutex(self.0);
         }
     }
 }
 
-impl Drop for MutexRecursive {
+impl Drop for Recursive {
     fn drop(&mut self) {
-        unsafe { freertos_rs_delete_semaphore(self.0) }
+        unsafe { glue::delete_semaphore(self.0) }
     }
 }
 
-impl fmt::Debug for MutexRecursive {
+impl fmt::Debug for Recursive {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self.0)
     }

@@ -10,3 +10,14 @@ keywords = ["FreeRTOS", "embedded", "library"]
 license = "MIT or APACHE-2.0"
 readme = "README.md"
 repository = "https://github.com/N3xed/freertos-rust"
+
+[dependencies]
+chlorine = "1.0"
+
+[target.xtensa-esp32-none-elf.dependencies]
+sys = { package = "freertos-esp32-sys", path = "../freertos-esp32-sys", version = "0.1"}
+
+[features]
+default = ["use-platform-strlen"]
+
+use-platform-strlen = []

@@ -1,7 +1,8 @@
 # FreeRTOS Rust wrapper
 
 Wrapper library to use FreeRTOS API in Rust.
-This library is based on [lobaro/FreeRTOS-rust](https://github.com/lobaro/FreeRTOS-rust)k.
+This library is based on [lobaro/FreeRTOS-rust](https://github.com/lobaro/FreeRTOS-rust).
+Currently only supports esp32 using the `freertos-esp32-sys` crate.
 
 ## License
 

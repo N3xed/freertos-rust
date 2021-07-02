@@ -1,80 +1,47 @@
-use crate::base::FreeRtosTickType;
-use crate::prelude::v1::*;
-use crate::shim::*;
+use core::fmt::Debug;
 
-pub trait FreeRtosTimeUnits {
-    fn get_tick_period_ms() -> u32;
-    fn get_max_wait() -> u32;
-}
+use crate::base::TickType;
+use crate::glue;
 
-#[derive(Copy, Clone, Default)]
-pub struct FreeRtosTimeUnitsShimmed;
-impl FreeRtosTimeUnits for FreeRtosTimeUnitsShimmed {
-    #[inline]
-    fn get_tick_period_ms() -> u32 {
-        unsafe { freertos_rs_get_portTICK_PERIOD_MS() }
-    }
-    #[inline]
-    fn get_max_wait() -> u32 {
-        unsafe { freertos_rs_max_wait() }
-    }
-}
-
-pub trait DurationTicks: Copy + Clone {
-    /// Convert to ticks, the internal time measurement unit of FreeRTOS
-    fn to_ticks(&self) -> FreeRtosTickType;
-}
-
-pub type Duration = DurationImpl<FreeRtosTimeUnitsShimmed>;
+pub use glue::MAX_DELAY;
+pub use glue::TICK_PERIOD_MS;
+pub use glue::TICK_RATE_HZ;
 
 /// Time unit used by FreeRTOS, passed to the scheduler as ticks.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct DurationImpl<T> {
-    ticks: u32,
-    _time_units: PhantomData<T>,
+#[derive(Copy, Clone, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct Ticks {
+    pub ticks: TickType,
 }
 
-impl<T> DurationImpl<T>
-where
-    T: FreeRtosTimeUnits + Copy,
-{
-    /// Milliseconds constructor
-    pub fn ms(milliseconds: u32) -> Self {
-        Self::ticks(milliseconds / T::get_tick_period_ms())
-    }
-
-    pub fn ticks(ticks: u32) -> Self {
-        DurationImpl {
-            ticks: ticks,
-            _time_units: PhantomData,
-        }
-    }
-
-    /// An infinite duration
-    pub fn infinite() -> Self {
-        Self::ticks(T::get_max_wait())
-    }
-
-    /// A duration of zero, for non-blocking calls
-    pub fn zero() -> Self {
-        Self::ticks(0)
-    }
-
-    /// Smallest unit of measurement, one tick
-    pub fn eps() -> Self {
-        Self::ticks(1)
-    }
-
-    pub fn to_ms(&self) -> u32 {
-        self.ticks * T::get_tick_period_ms()
+impl Debug for Ticks {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} ms ({} ticks)", self.to_milliseconds(), self.ticks)
     }
 }
 
-impl<T> DurationTicks for DurationImpl<T>
-where
-    T: FreeRtosTimeUnits + Copy,
-{
-    fn to_ticks(&self) -> FreeRtosTickType {
-        self.ticks
+impl Ticks {
+    pub const fn new(ticks: TickType) -> Ticks {
+        Ticks { ticks }
+    }
+
+    pub const fn milliseconds(ms: u32) -> Ticks {
+        Self::new((ms / TICK_PERIOD_MS) as TickType)
+    }
+
+    pub const fn seconds(secs: u32) -> Ticks {
+        Self::new((secs * 1000 / TICK_PERIOD_MS) as TickType)
+    }
+
+    pub const fn infinite() -> Ticks {
+        Self::new(MAX_DELAY)
+    }
+
+    pub const fn zero() -> Ticks {
+        Self::new(0)
+    }
+
+    pub const fn to_milliseconds(&self) -> u32 {
+        self.ticks * TICK_PERIOD_MS
     }
 }

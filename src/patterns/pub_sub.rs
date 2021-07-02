@@ -1,6 +1,6 @@
 use crate::base::*;
 use crate::mutex::*;
-use crate::prelude::v1::*;
+use crate::prelude::*;
 use crate::queue::*;
 use crate::units::*;
 
@@ -29,8 +29,9 @@ impl<T: Sized + Copy> QueuePublisher<T> {
 
     /// Send an item to every subscriber. Returns the number of
     /// subscribers that have received the item.
-    pub fn send<D: DurationTicks>(&self, item: T, max_wait: D) -> usize {
+    pub fn send(&self, item: T, max_wait: impl Into<Ticks>) -> usize {
         let mut sent_to = 0;
+        let max_wait = max_wait.into();
 
         if let Ok(m) = self.inner.lock(max_wait) {
             for subscriber in &m.subscribers {
@@ -44,10 +45,10 @@ impl<T: Sized + Copy> QueuePublisher<T> {
     }
 
     /// Subscribe to this publisher. Can accept a fixed amount of items.
-    pub fn subscribe<D: DurationTicks>(
+    pub fn subscribe(
         &self,
         max_size: usize,
-        create_max_wait: D,
+        create_max_wait: impl Into<Ticks>,
     ) -> Result<QueueSubscriber<T>, FreeRtosError> {
         let mut inner = self.inner.lock(create_max_wait)?;
 
@@ -79,7 +80,7 @@ impl<T: Sized + Copy> Clone for QueuePublisher<T> {
 
 impl<T: Sized + Copy> Drop for QueueSubscriber<T> {
     fn drop(&mut self) {
-        if let Ok(mut l) = self.inner.publisher.lock(Duration::infinite()) {
+        if let Ok(mut l) = self.inner.publisher.lock(Ticks::infinite()) {
             l.unsubscribe(&self.inner);
         }
     }
@@ -87,7 +88,7 @@ impl<T: Sized + Copy> Drop for QueueSubscriber<T> {
 
 impl<T: Sized + Copy> QueueSubscriber<T> {
     /// Wait for an item to be posted from the publisher.
-    pub fn receive<D: DurationTicks>(&self, max_wait: D) -> Result<T, FreeRtosError> {
+    pub fn receive(&self, max_wait: impl Into<Ticks>) -> Result<T, FreeRtosError> {
         self.inner.queue.receive(max_wait)
     }
 }
