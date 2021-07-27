@@ -12,6 +12,7 @@ unsafe impl<T: Sized + Copy> Sync for Queue<T> {}
 /// A queue with a finite size. The items are owned by the queue and are
 /// copied.
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct Queue<T: Sized + Copy> {
     queue: QueueHandle,
     item_type: PhantomData<T>,
@@ -20,8 +21,8 @@ pub struct Queue<T: Sized + Copy> {
 impl<T: Sized + Copy> Queue<T> {
     pub fn new(max_size: usize) -> Result<Queue<T>, FreeRtosError> {
         match unsafe { glue::queue_create(max_size as u32, mem::size_of::<T>() as u32) } {
-            Some(s) => Ok(Queue {
-                queue: s.as_ptr(),
+            Some(queue) => Ok(Queue {
+                queue,
                 item_type: PhantomData,
             }),
             None => Err(FreeRtosError::OutOfMemory),

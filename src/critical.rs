@@ -4,16 +4,16 @@ use core::ops::{Deref, DerefMut};
 use crate::base::*;
 use crate::glue;
 
-pub struct CriticalRegion(UBaseType);
-impl CriticalRegion {
+pub struct CriticalSection(UBaseType);
+impl CriticalSection {
     pub fn enter() -> Self {
         let previous_state = unsafe { glue::enter_critical() };
 
-        CriticalRegion(previous_state)
+        CriticalSection(previous_state)
     }
 }
 
-impl Drop for CriticalRegion {
+impl Drop for CriticalSection {
     fn drop(&mut self) {
         unsafe {
             glue::exit_critical(self.0);
@@ -40,7 +40,7 @@ impl<T> ExclusiveData<T> {
     pub fn lock(&self) -> Result<ExclusiveDataGuard<T>, FreeRtosError> {
         Ok(ExclusiveDataGuard {
             data: &self.data,
-            _lock: CriticalRegion::enter(),
+            _lock: CriticalSection::enter(),
         })
     }
 
@@ -55,7 +55,7 @@ impl<T> ExclusiveData<T> {
 /// Holds the mutex until we are dropped
 pub struct ExclusiveDataGuard<'a, T: ?Sized + 'a> {
     data: &'a UnsafeCell<T>,
-    _lock: CriticalRegion,
+    _lock: CriticalSection,
 }
 
 impl<'mutex, T: ?Sized> Deref for ExclusiveDataGuard<'mutex, T> {

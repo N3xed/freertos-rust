@@ -28,7 +28,7 @@ impl ComputeTaskBuilder for TaskBuilder {
 
             let task_result = result.clone();
             let task_status = status.clone();
-            let task = self.start(move |_this_task| {
+            let task = self.start(move || {
                 {
                     let mut lock = task_result.lock(Ticks::infinite()).unwrap();
                     let r = func();

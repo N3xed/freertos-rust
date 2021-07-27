@@ -1,6 +1,5 @@
 use core::fmt;
 use core::mem;
-use core::ptr;
 
 use crate::base::*;
 use crate::glue;
@@ -70,46 +69,91 @@ impl TaskPriority {
     }
 }
 
+/// Create a mask where the arguments specify which bit should be `1`.
+#[macro_export]
+macro_rules! make_mask {
+    ($($core:expr),*) => {
+        0 | $(((1 as _) << ($core as _))) |*
+    };
+}
+
 /// Helper for spawning a new task. Instantiate with [`Task::new()`].
-///
-/// [`Task::new()`]: struct.Task.html#method.new
 pub struct TaskBuilder {
-    task_name: String,
-    task_stack_size: u16,
-    task_priority: TaskPriority,
+    name: String,
+    stack_size: u16,
+    priority: TaskPriority,
+
+    #[cfg(feature = "smp")]
+    core_affinity_mask: UBaseType,
 }
 
 impl TaskBuilder {
     /// Set the task's name.
     pub fn name(&mut self, name: &str) -> &mut Self {
-        self.task_name = name.into();
+        self.name = name.into();
         self
     }
 
     /// Set the stack size, in words.
     pub fn stack_size(&mut self, stack_size: u16) -> &mut Self {
-        self.task_stack_size = stack_size;
+        self.stack_size = stack_size;
         self
     }
 
     /// Set the task's priority.
     pub fn priority(&mut self, priority: TaskPriority) -> &mut Self {
-        self.task_priority = priority;
+        self.priority = priority;
+        self
+    }
+
+    #[cfg(feature = "smp")]
+    /// Set the core affinity mask.
+    pub fn core_affinity(&mut self, core_affinity_mask: UBaseType) -> &mut Self {
+        self.core_affinity_mask = core_affinity_mask;
         self
     }
 
     /// Start a new task that can't return a value.
     pub fn start<F>(&self, func: F) -> Result<Task, FreeRtosError>
     where
-        F: FnOnce(Task) -> (),
-        F: Send + 'static,
+        F: FnOnce() + Send + 'static,
     {
-        Task::spawn(
-            &self.task_name,
-            self.task_stack_size,
-            self.task_priority,
-            func,
-        )
+        Task::spawn(&self, func)
+    }
+
+    pub fn start_raw(
+        &self,
+        func: extern "C" fn(*mut c_void),
+        arg: *mut c_void,
+    ) -> Result<Task, FreeRtosError> {
+        let (success, task_handle) = {
+            let mut task_handle: MaybeTaskHandle = None;
+            let ret = unsafe {
+                glue::create_task(
+                    func,
+                    arg,
+                    &self.name,
+                    self.stack_size,
+                    self.priority.to_freertos(),
+                    &mut task_handle,
+                )
+            };
+
+            (ret, task_handle)
+        };
+
+        if success {
+            #[cfg(feature = "smp")]
+            unsafe {
+                glue::set_core_affinity(task_handle, self.core_affinity_mask);
+            }
+
+            Ok(Task {
+                task_handle: unsafe { mem::transmute(task_handle) },
+            })
+        } else {
+            Err(FreeRtosError::OutOfMemory)
+        }
     }
 }
 
@@ -117,34 +161,41 @@ impl Task {
     /// Prepare a builder object for the new task.
     pub fn new() -> TaskBuilder {
         TaskBuilder {
-            task_name: "rust_task".into(),
-            task_stack_size: 1024,
-            task_priority: TaskPriority(1),
+            name: "rust_task".into(),
+            stack_size: 1024,
+            priority: TaskPriority(1),
+            #[cfg(feature = "smp")]
+            core_affinity_mask: UBaseType::MAX,
         }
     }
 
-    fn spawn<F>(
-        name: &str,
-        stack_size: u16,
-        priority: TaskPriority,
-        f: F,
-    ) -> Result<Task, FreeRtosError>
+    pub fn into_raw(self) -> TaskHandle {
+        self.task_handle
+    }
+
+    pub fn from_raw(handle: TaskHandle) -> Task {
+        Task {
+            task_handle: handle,
+        }
+    }
+
+    fn spawn<F>(builder: &TaskBuilder, f: F) -> Result<Task, FreeRtosError>
     where
-        F: FnOnce(Task) + Send + 'static,
+        F: FnOnce() + Send + 'static,
     {
         unsafe {
             let mut f = Box::new(f);
             let param_ptr = f.as_mut() as *mut F as *mut _;
 
             let (success, task_handle) = {
-                let mut task_handle = mem::zeroed::<TaskHandle>();
+                let mut task_handle: MaybeTaskHandle = None;
 
                 let ret = glue::create_task(
-                    Self::thread_start::<F>,
+                    Self::boxed_thread_start::<F>,
                     param_ptr,
-                    name,
-                    stack_size,
-                    priority.to_freertos(),
+                    &builder.name,
+                    builder.stack_size,
+                    builder.priority.to_freertos(),
                     &mut task_handle,
                 );
 
@@ -152,19 +203,24 @@ impl Task {
             };
 
             if success {
+                #[cfg(feature = "smp")]
+                glue::set_core_affinity(task_handle, builder.core_affinity_mask);
+
                 mem::forget(f);
-                Ok(Task { task_handle })
+                Ok(Task {
+                    task_handle: mem::transmute(task_handle),
+                })
             } else {
                 Err(FreeRtosError::OutOfMemory)
             }
         }
     }
 
-    extern "C" fn thread_start<F: FnOnce(Task)>(arg: *mut c_void) {
+    extern "C" fn boxed_thread_start<F: FnOnce()>(arg: *mut c_void) {
         unsafe {
             let b = Box::from_raw(arg as *mut F);
-            b(Task::current());
-            glue::delete_task(ptr::null_mut());
+            b();
+            glue::delete_task(None);
         }
     }
 
@@ -177,7 +233,7 @@ impl Task {
     pub fn current() -> Task {
         unsafe {
             Task {
-                task_handle: glue::get_current_task().unwrap().as_ptr(),
+                task_handle: glue::get_current_task().unwrap(),
             }
         }
     }
@@ -198,7 +254,7 @@ impl Task {
     /// Notify this task from an interrupt.
     pub fn notify_from_isr(
         &self,
-        context: &InterruptContext,
+        context: &mut InterruptContext,
         notification: TaskNotification,
     ) -> Result<(), FreeRtosError> {
         unsafe {
@@ -245,7 +301,14 @@ impl Task {
 
     /// Get the minimum amount of stack that was ever left on this task.
     pub fn get_stack_high_water_mark(&self) -> u32 {
-        unsafe { glue::get_stack_high_water_mark(self.task_handle) as u32 }
+        unsafe { glue::get_stack_high_water_mark(Some(self.task_handle)) as u32 }
+    }
+
+    /// Request a context switch to another task.
+    pub fn yield_() {
+        unsafe {
+            glue::task_yield();
+        }
     }
 }
 
@@ -262,7 +325,7 @@ impl CurrentTask {
 
     /// Get the minimum amount of stack that was ever left on the current task.
     pub fn get_stack_high_water_mark() -> u32 {
-        unsafe { glue::get_stack_high_water_mark(0 as TaskHandle) as u32 }
+        unsafe { glue::get_stack_high_water_mark(None) as u32 }
     }
 }
 
@@ -364,7 +427,7 @@ pub fn get_all_tasks(tasks_len: Option<usize>) -> SchedulerState {
         .into_iter()
         .map(|t| TaskStatus {
             task: Task {
-                task_handle: t.xHandle as _,
+                task_handle: unsafe { TaskHandle::new_unchecked(t.xHandle as _) },
             },
             name: unsafe { str_from_c_string(&t.pcTaskName) }.to_owned(),
             task_number: t.xTaskNumber,

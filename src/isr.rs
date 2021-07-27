@@ -17,8 +17,8 @@ impl InterruptContext {
         }
     }
 
-    pub unsafe fn get_task_field_mut(&self) -> *mut BaseType {
-        self.x_higher_priority_task_woken as *mut _
+    pub unsafe fn get_task_field_mut(&mut self) -> *mut BaseType {
+        &mut self.x_higher_priority_task_woken as *mut _
     }
 }
 
@@ -26,7 +26,7 @@ impl Drop for InterruptContext {
     fn drop(&mut self) {
         if self.x_higher_priority_task_woken == 1 {
             unsafe {
-                glue::isr_yield();
+                glue::task_yield_from_isr();
             }
         }
     }

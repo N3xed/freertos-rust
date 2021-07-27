@@ -95,7 +95,7 @@ impl Timer {
                 Some(h) => {
                     mem::forget(f);
                     Ok(Timer {
-                        handle: h.as_ptr(),
+                        handle: h,
                         destructor: Some(Self::timer_destructor::<F>),
                     })
                 }

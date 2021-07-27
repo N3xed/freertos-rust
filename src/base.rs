@@ -22,12 +22,12 @@ pub use sys::StackType_t as StackType;
 pub use sys::TickType_t as TickType;
 pub use sys::UBaseType_t as UBaseType;
 
-pub type TaskHandle = *mut c_void;
-pub type MaybeTaskHandle = Option<ptr::NonNull<c_void>>;
-pub type QueueHandle = *mut c_void;
-pub type MaybeQueueHandle = Option<ptr::NonNull<c_void>>;
-pub type TimerHandle = *mut c_void;
-pub type MaybeTimerHandle = Option<ptr::NonNull<c_void>>;
+pub type TaskHandle = ptr::NonNull<c_void>;
+pub type MaybeTaskHandle = Option<TaskHandle>;
+pub type QueueHandle = ptr::NonNull<c_void>;
+pub type MaybeQueueHandle = Option<QueueHandle>;
+pub type TimerHandle = ptr::NonNull<c_void>;
+pub type MaybeTimerHandle = Option<TimerHandle>;
 
 pub use sys::TaskStatus_t as TaskStatusFfi;
 

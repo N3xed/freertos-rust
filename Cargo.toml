@@ -21,3 +21,4 @@ sys = { package = "freertos-esp32-sys", path = "../freertos-esp32-sys", version 
 default = ["use-platform-strlen"]
 
 use-platform-strlen = []
+smp = []

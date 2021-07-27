@@ -1,8 +1,10 @@
+use crate::InterruptContext;
 use crate::base::*;
 use crate::glue;
 use crate::units::*;
 
 /// A counting or binary semaphore
+#[repr(transparent)]
 pub struct Semaphore {
     semaphore: QueueHandle,
 }
@@ -15,8 +17,8 @@ impl Semaphore {
     pub fn new_binary() -> Result<Semaphore, FreeRtosError> {
         unsafe {
             match glue::create_binary_semaphore() {
-                Some(s) => Ok(Semaphore {
-                    semaphore: s.as_ptr(),
+                Some(semaphore) => Ok(Semaphore {
+                    semaphore,
                 }),
                 None => Err(FreeRtosError::OutOfMemory),
             }
@@ -27,8 +29,8 @@ impl Semaphore {
     pub fn new_counting(max: u32, initial: u32) -> Result<Semaphore, FreeRtosError> {
         unsafe {
             match glue::create_counting_semaphore(max, initial) {
-                Some(s) => Ok(Semaphore {
-                    semaphore: s.as_ptr(),
+                Some(semaphore) => Ok(Semaphore {
+                    semaphore,
                 }),
                 None => Err(FreeRtosError::OutOfMemory),
             }
@@ -44,6 +46,41 @@ impl Semaphore {
                 })
             } else {
                 Err(FreeRtosError::Timeout)
+            }
+        }
+    }
+    
+    /// Give this semaphore
+    pub fn give(&self) -> Result<(), FreeRtosError> {
+        unsafe {
+            if glue::give_mutex(self.semaphore) {
+                Ok(())
+            }
+            else {
+                Err(FreeRtosError::QueueFull)
+            }
+        }
+    }
+
+    /// Take this semaphore
+    pub fn take(&self, max_wait: impl Into<Ticks>) -> Result<(), FreeRtosError> {
+        unsafe {
+            if glue::take_mutex(self.semaphore, max_wait.into().ticks) {
+                Ok(())
+            } else {
+                Err(FreeRtosError::Timeout)
+            }
+        }
+    }
+
+    /// Give this semaphore from an interrupt context
+    pub fn give_from_isr(&self, interrupt_context: &mut InterruptContext) -> Result<(), FreeRtosError> {
+        unsafe {
+            if glue::give_mutex_isr(self.semaphore, interrupt_context.get_task_field_mut()) {
+                Ok(())
+            }
+            else {
+                Err(FreeRtosError::QueueFull)
             }
         }
     }

@@ -137,7 +137,7 @@ pub struct Normal(QueueHandle);
 impl Lockable for Normal {
     fn create() -> Result<Self, FreeRtosError> {
         match unsafe { glue::create_mutex() } {
-            Some(h) => Ok(Normal(h.as_ptr())),
+            Some(h) => Ok(Normal(h)),
             None => Err(FreeRtosError::OutOfMemory),
         }
     }
@@ -174,7 +174,7 @@ pub struct Recursive(QueueHandle);
 impl Lockable for Recursive {
     fn create() -> Result<Self, FreeRtosError> {
         match unsafe { glue::create_recursive_mutex() } {
-            Some(m) => Ok(Recursive(m.as_ptr())),
+            Some(m) => Ok(Recursive(m)),
             None => Err(FreeRtosError::OutOfMemory),
         }
     }
